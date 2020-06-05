@@ -278,7 +278,7 @@ class FusionModel(LightningModule):
 								lr=self.hparams.lr, betas=(0.9, 0.999), 
 								weight_decay = self.hparams.weight_decay)
 	
-		scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma = 0.1)
+		scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma = 0.1)
 		return [optimizer], [scheduler]
 
 	def train_dataloader(self):
@@ -303,12 +303,15 @@ class FusionModel(LightningModule):
 		else:
 			rgb = self.augGPU_resize(batch[0][:, :, :, :int(nW/2), :].type(torch.float)/255., npix_resize = (224, 224))
 			of 	= self.augGPU_resize(batch[0][:, :, :, int(nW/2):, :].type(torch.float)/255., npix_resize = (224, 224))
-		#of = self.augGPU_normalize_inplace(of, mean = [0.01, 0.01, 0.01], std = [0.05, 0.05, 0.05])
+		of = self.augGPU_normalize_inplace(of, mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
+		rgb = self.augGPU_normalize_inplace(rgb, mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
 		#rgb = self.augGPU_normalize_inplace(rgb, mean = [0.3, 0.2, 0.2], std = [0.2, 0.2, 0.2])
-		rgb = self.augGPU_normalize_inplace(rgb, mean = [0.3, 0.2, 0.2], std = [0.2, 0.2, 0.2])
-		of = self.augGPU_normalize_inplace(of, mean = [0.01, 0.01, 0.01], std = [0.05, 0.05, 0.05])
-		print(of.size())
-
+		#of = self.augGPU_normalize_inplace(of, mean = [0.985, 0.985, 0.985], std = [0.005, 0.005, 0.005])
+		# print('mean:rgb', of.reshape(-1, 3).mean(0))
+		# print('std:rgb', of.reshape(-1, 3).std(0))
+		# print('mean:rgb', rgb.reshape(-1, 3).mean(0))
+		# print('std:rgb', rgb.reshape(-1, 3).std(0))
+		
 		return [torch.stack([rgb, of], axis = -1), batch[1]]
 
 	def augGPU_resize(self, input, seed = None, npix_resize = (224, 224), random_crop = False):
