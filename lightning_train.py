@@ -128,6 +128,21 @@ class FusionModel(LightningModule):
 				param.requires_grad = self.trainable_base
 			self.fc_pre = nn.Sequential(nn.Linear(512*7*7, int(args.fc_size/2)), nn.Dropout()) if 'conv' not in args.rnn_model else None
 			self.final_channels = 512
+				super(SimCLRModel, self).__init__()
+		elif args.arch.startswith('simCLR_resnet18')
+			self.f = []
+			for name, module in resnet18().named_children():
+				if name == 'conv1':
+					module = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+				if not isinstance(module, nn.Linear) and not isinstance(module, nn.MaxPool2d):
+					self.f.append(module)
+			# encoder
+			self.f.extend([nn.Linear(512, 128), nn.BatchNorm1d(128), nn.ReLU(inplace=True),  nn.Linear(128, 64, bias=True)])
+			self.features = nn.Sequential(*self.f)
+			if 'conv' in args.rnn_model:
+				print('this combination of rnn with backbone not implemented yet')
+			self.fc_pre = nn.nn.Sequential(nn.Linear(64, int(args.fc_size/2))
+			
 		elif args.arch.startswith('resnet34'):
 			self.features = nn.Sequential(*list(original_model.children())[:-2])
 			for i, param in enumerate(self.features.parameters()):
@@ -410,7 +425,6 @@ if __name__ == '__main__':
 	if hparams.overfit == 1:
 		kwargs['overfit_pct'] = 0.05
 
-	
 	if hparams.loadchk == '':
 		trainer = Trainer(**kwargs)
 	else:
