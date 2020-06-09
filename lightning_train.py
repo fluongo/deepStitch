@@ -101,7 +101,10 @@ class FusionModel(LightningModule):
 		############################################################################################
 
 		# Model specific
-		original_model = models.__dict__[args.arch](pretrained=self.hparams.use_pretrained)
+		if args.arch.startswith('simCLR'): 
+			print('not loading model because using contrastive pretrained approach')
+		else:
+			original_model = models.__dict__[args.arch](pretrained=self.hparams.use_pretrained)
 		self.hidden_size = args.hidden_size
 		self.num_classes = len(args.include_classes)
 		self.fc_size = args.fc_size
@@ -114,7 +117,7 @@ class FusionModel(LightningModule):
 				param.requires_grad = self.trainable_base
 			# Make the output of each one be to fc_size/2 so that we cooncat the two fc outputs
 			self.fc_pre = nn.Sequential(nn.Linear(256*6*6, int(args.fc_size/2) ), nn.Dropout()) if 'conv' not in args.rnn_model else None
-			self.final_channels = 256
+			self.final_channels = 256		
 		elif args.arch.startswith('vgg16'):
 			self.features = original_model.features
 			for i, param in enumerate(self.features.parameters()):
@@ -128,20 +131,45 @@ class FusionModel(LightningModule):
 				param.requires_grad = self.trainable_base
 			self.fc_pre = nn.Sequential(nn.Linear(512*7*7, int(args.fc_size/2)), nn.Dropout()) if 'conv' not in args.rnn_model else None
 			self.final_channels = 512
-				super(SimCLRModel, self).__init__()
-		elif args.arch.startswith('simCLR_resnet18')
-			self.f = []
-			for name, module in resnet18().named_children():
-				if name == 'conv1':
-					module = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-				if not isinstance(module, nn.Linear) and not isinstance(module, nn.MaxPool2d):
-					self.f.append(module)
+		elif args.arch.startswith('simCLR_alexnet'):
+			self.features = models.alexnet().features
+			# Load the weights for feature extractor
+			ckpt_fn = 'simCLR_alexnet_ckpt_epoch_959.ckpt' 
+			x = torch.load(ckpt_fn)
+			pretrained_dict = x['state_dict']
+			
+			# Filter for those in this defined model and preload weights
+			pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in self.state_dict()}
+			self.load_state_dict(pretrained_dict)
+			
+			for i, param in enumerate(self.features.parameters()):
+				param.requires_grad = self.trainable_base
+			
+			self.fc_pre = nn.Sequential(nn.Linear(256*6*6, int(args.fc_size/2) ), nn.Dropout()) if 'conv' not in args.rnn_model else None
+			self.final_channels = 256
+
+		elif args.arch.startswith('simCLR_resnet18'):
+			self.features=[]
+			for name, module in models.resnet18().named_children():
+				self.features.append(module)
 			# encoder
-			self.f.extend([nn.Linear(512, 128), nn.BatchNorm1d(128), nn.ReLU(inplace=True),  nn.Linear(128, 64, bias=True)])
-			self.features = nn.Sequential(*self.f)
-			if 'conv' in args.rnn_model:
-				print('this combination of rnn with backbone not implemented yet')
-			self.fc_pre = nn.nn.Sequential(nn.Linear(64, int(args.fc_size/2))
+			self.features = nn.Sequential(*self.features[:-1]) # Chop off average pool used in the simCLR train
+			
+			# Load the weights for feature extractor
+			ckpt_fn = 'simCLR_resnet18_ckpt_epoch_960.ckpt' 
+			x = torch.load(ckpt_fn)
+			pretrained_dict = x['state_dict']
+			
+			# Filter for those in this defined model and preload weights
+			pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in self.state_dict()}
+			self.load_state_dict(pretrained_dict)
+
+			# Whether or not to fix or train the base feature extractor
+			for i, param in enumerate(self.features.parameters()):
+				param.requires_grad = self.trainable_base
+			
+			self.fc_pre = nn.Sequential(nn.Linear(512*7*7, int(args.fc_size/2)), nn.Dropout()) if 'conv' not in args.rnn_model else None
+			self.final_channels = 512
 			
 		elif args.arch.startswith('resnet34'):
 			self.features = nn.Sequential(*list(original_model.children())[:-2])
@@ -151,8 +179,13 @@ class FusionModel(LightningModule):
 			self.final_channels = 512
 		else:
 			raise ValueError('architecture base model not yet implemented choices: alexnet, vgg16, ResNet 18/34')
-		# Select an RNN
-		#print(self.features)
+		
+		# Select an RNN // Number of filters e.g. nF x nF at final output
+		if 'alexnet' in args.arch:
+			nF = 6	
+		else:
+			nF = 7
+
 		if args.rnn_model == 'LSTM':
 			self.rnn = nn.LSTM(input_size = args.fc_size,
 						hidden_size = args.hidden_size,
@@ -162,14 +195,10 @@ class FusionModel(LightningModule):
 		elif args.rnn_model == 'convLSTM': 
 			# Twice number of channels for RGB and OF which are concat
 			self.rnn = ConvLSTMCell(input_channels = self.final_channels*2, hidden_channels = self.final_channels, kernel_size = 3, bias = True)
-			
-			nF = 6 if args.arch.startswith('alexnet') else 7
-			self.fc = nn.Linear(self.final_channels*nF*nF, self.num_classes)
+			self.fc = nn.Sequential(nn.Linear(self.final_channels*nF*nF, self.num_classes))
 		elif args.rnn_model == 'convttLSTM': 
 			# Twice number of channels for RGB and OF which are concat
 			self.rnn = ConvTTLSTMCell(input_channels = self.final_channels*2, hidden_channels = self.final_channels, order = 3, steps = 5, ranks = 16, kernel_size = 3, bias = True)
-			
-			nF = 6 if args.arch.startswith('alexnet') else 7
 			self.fc = nn.Linear(self.final_channels*nF*nF, self.num_classes)
 		else:
 			raise ValueError('Not implemented, choose LSTM, convLSTM, convttLSTM type')
@@ -299,14 +328,14 @@ class FusionModel(LightningModule):
 	def train_dataloader(self):
 		train_dataset 	= CustomDataset(self.hparams.datadir, idxs = self.hparams.idx_train , include_classes = self.hparams.include_classes, 
 							flow_method = self.hparams.flow_method, balance_classes=True, mode = 'train', max_frames = self.hparams.loader_nframes, stride = self.hparams.loader_stride)
-		train_dataloader 	= DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=1)
+		train_dataloader 	= DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=0)
 		self.epoch_len = len(train_dataset)
 		return train_dataloader
 
 	def val_dataloader(self):
 		val_dataset 	= CustomDataset(self.hparams.datadir, idxs = self.hparams.idx_test , include_classes = self.hparams.include_classes, 
 							flow_method = self.hparams.flow_method, balance_classes=False, mode = 'val', max_frames = self.hparams.loader_nframes, stride = self.hparams.loader_stride)
-		val_dataloader 	= DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=1)
+		val_dataloader 	= DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=0)
 		return val_dataloader
 
 	def apply_transforms_GPU(self, batch, random_crop = False):
@@ -322,8 +351,7 @@ class FusionModel(LightningModule):
 		rgb = self.augGPU_normalize_inplace(rgb, mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
 		#rgb = self.augGPU_normalize_inplace(rgb, mean = [0.3, 0.2, 0.2], std = [0.2, 0.2, 0.2])
 		#of = self.augGPU_normalize_inplace(of, mean = [0.01, 0.01, 0.01], std = [0.05, 0.05, 0.05])
-		print(of.size())
-
+		
 		return [torch.stack([rgb, of], axis = -1), batch[1]]
 
 	def augGPU_resize(self, input, seed = None, npix_resize = (224, 224), random_crop = False):
@@ -371,18 +399,18 @@ if __name__ == '__main__':
 	parser.add_argument('--epochs', default=60, type=int, help='manual epoch number')
 	parser.add_argument('--lr', default=0.0001, type=float, help='initial learning rate')
 	parser.add_argument('--lr_lambdas', default=0.9, type=float, help='Schedulre hyperparam')
-	parser.add_argument('--include_classes', default='01_02', type=str, help='Which classnames to include seperated by _ e.g. 00_01')
+	parser.add_argument('--include_classes', default='01_02_03_07_13', type=str, help='Which classnames to include seperated by _ e.g. 00_01')
 	parser.add_argument('--flow_method', default='flownet', type=str, help='Which flow method to use (flownet or dali)')
 	parser.add_argument('--random_crop', default=0, type=int, help='Whether or not to augment with random crops...')
 	parser.add_argument('--seed', default=0, type=int)
 	parser.add_argument('--train_proportion', default=0.8, type=float)
 	parser.add_argument('--weight_decay', default=0.01, type=float)
-	parser.add_argument('--accum_batches', default=1, type=int)
+	parser.add_argument('--accum_batches', default=10, type=int)
 	parser.add_argument('--overfit', default=0, type=int)
 	parser.add_argument('--auto_lr', default=0, type=int)
 	parser.add_argument('--use_pretrained', default=1, type=int, help='whether or not to load pretrained weights')
 	parser.add_argument('--logging_dir', default='lightning_logs', type=str)
-	parser.add_argument('--loader_nframes', default=300, type=int, help='How many frames to load at stride 2')
+	parser.add_argument('--loader_nframes', default=140, type=int, help='How many frames to load at stride 2')
 	parser.add_argument('--loader_stride', default=2, type=int, help='stride for dataloader')
 	
 	hparams = parser.parse_args()

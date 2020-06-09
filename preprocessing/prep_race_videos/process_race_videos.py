@@ -115,51 +115,55 @@ for nn in range(len(df)):
                         kk+=1
                 df.at[nn, 'meta_cut_%s%s' % (tp_letter, tp_letter)] = fns
 
-# Add an existing column for first and last for all Cs and Ds
-'label_needle_entry_angleC'
-'label_hitmiss_timepointC'
-'label_hitmissD'
-'label_needle_driving_1D'
+
+
+
+
+# # Add an existing column for first and last for all Cs and Ds
+# 'label_needle_entry_angleC'
+# 'label_hitmiss_timepointC'
+# 'label_hitmissD'
+# 'label_needle_driving_1D'
 
 
 
 
 
 
-#df.to_excel('/home/fluongo/code/usc_project/USC_lightning/preprocessing/prep_race_videos/RACE_francisco_export.xlsx')
+# #df.to_excel('/home/fluongo/code/usc_project/USC_lightning/preprocessing/prep_race_videos/RACE_francisco_export.xlsx')
 
 
-# %%
-from collections import Counter
+# # %%
+# from collections import Counter
 
 
-# Go through and if its a list assign the first one as the label
-tps = ['AB', 'BC', 'CD', 'DE', 'EF', 'FG']
-lbs = ['needle_positionB', 'needle_entry_angleC', 'hitmiss_timepointC', 'hitmissD', 'needle_driving_1D', 'needle_driving_2FG']
+# # Go through and if its a list assign the first one as the label
+# tps = ['AB', 'BC', 'CD', 'DE', 'EF', 'FG']
+# lbs = ['needle_positionB', 'needle_entry_angleC', 'hitmiss_timepointC', 'hitmissD', 'needle_driving_1D', 'needle_driving_2FG']
 
-df_count = pd.DataFrame(index = tps, columns = pd.MultiIndex.from_product([tuple(lbs), (0, 1)],
-                           names=['name', 'val']))
+# df_count = pd.DataFrame(index = tps, columns = pd.MultiIndex.from_product([tuple(lbs), (0, 1)],
+#                            names=['name', 'val']))
 
-for a in tps:
-    for b in lbs:
-        label_name = 'label_%s' %b
-        cut_name = 'meta_cut_%s' % a
-        df_sub = df[[cut_name, label_name]].dropna()
-        # Do the long way of counting
-        cnts = []
-        for ii in range(len(df_sub)):
-            if type(df_sub.iloc[ii][label_name]) != list:
-                cnts.append(df_sub.iloc[ii][label_name])
-            else:
-                cnts.append(df_sub.iloc[ii][label_name][0])
+# for a in tps:
+#     for b in lbs:
+#         label_name = 'label_%s' %b
+#         cut_name = 'meta_cut_%s' % a
+#         df_sub = df[[cut_name, label_name]].dropna()
+#         # Do the long way of counting
+#         cnts = []
+#         for ii in range(len(df_sub)):
+#             if type(df_sub.iloc[ii][label_name]) != list:
+#                 cnts.append(df_sub.iloc[ii][label_name])
+#             else:
+#                 cnts.append(df_sub.iloc[ii][label_name][0])
         
-        c_cnt = Counter(cnts)
-        for k in [0, 1]:
-            df_count.at[a, (b, k)] = c_cnt[k]
+#         c_cnt = Counter(cnts)
+#         for k in [0, 1]:
+#             df_count.at[a, (b, k)] = c_cnt[k]
         
 
 
 
 
 
-# %%
+# # %%
