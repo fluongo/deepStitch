@@ -109,31 +109,23 @@ class FusionModel(LightningModule):
 
 		# select a base model
 		if args.arch.startswith('alexnet'):
-			self.features = original_model.features
-			for i, param in enumerate(self.features.parameters()):
+			self.features_rgb = original_model.features
+			for i, param in enumerate(self.features_rgb.parameters()):
 				param.requires_grad = self.trainable_base
+			self.features_of = deepcopy(original_model.features)
+			for i, param in enumerate(self.features_of.parameters()):
+				param.requires_grad = self.trainable_base
+			
 			# Make the output of each one be to fc_size/2 so that we cooncat the two fc outputs
-			self.fc_pre = nn.Sequential(nn.Linear(256*6*6, int(args.fc_size/2) ), nn.Dropout()) if 'conv' not in args.rnn_model else None
+			self.fc_pre_rgb = nn.Sequential(nn.Linear(256*6*6, int(args.fc_size/2) ), nn.Dropout()) if 'conv' not in args.rnn_model else None
+			self.fc_pre_of = nn.Sequential(nn.Linear(256*6*6, int(args.fc_size/2) ), nn.Dropout()) if 'conv' not in args.rnn_model else None
 			self.final_channels = 256
-		elif args.arch.startswith('vgg16'):
-			self.features = original_model.features
-			for i, param in enumerate(self.features.parameters()):
-				param.requires_grad = self.trainable_base
-			# Make the output of each one be to fc_size/2 so that we cooncat the two fc outputs
-			self.fc_pre = nn.Sequential(nn.Linear(512*7*7, int(args.fc_size/2) ), nn.Dropout()) if 'conv' not in args.rnn_model else None
-			self.final_channels = 512
-		elif args.arch.startswith('resnet18'):
-			self.features = nn.Sequential(*list(original_model.children())[:-2])
-			for i, param in enumerate(self.features.parameters()):
-				param.requires_grad = self.trainable_base
-			self.fc_pre = nn.Sequential(nn.Linear(512*7*7, int(args.fc_size/2)), nn.Dropout()) if 'conv' not in args.rnn_model else None
-			self.final_channels = 512
-		elif args.arch.startswith('resnet34'):
-			self.features = nn.Sequential(*list(original_model.children())[:-2])
-			for i, param in enumerate(self.features.parameters()):
-				param.requires_grad = self.trainable_base
-			self.fc_pre = nn.Sequential(nn.Linear(512*7*7, int(args.fc_size/2)), nn.Dropout()) if 'conv' not in args.rnn_model else None
-			self.final_channels = 512
+		# elif args.arch.startswith('resnet18'):
+		# 	self.features = nn.Sequential(*list(original_model.children())[:-2])
+		# 	for i, param in enumerate(self.features.parameters()):
+		# 		param.requires_grad = self.trainable_base
+		# 	self.fc_pre = nn.Sequential(nn.Linear(512*7*7, int(args.fc_size/2)), nn.Dropout()) if 'conv' not in args.rnn_model else None
+		# 	self.final_channels = 512
 		else:
 			raise ValueError('architecture base model not yet implemented choices: alexnet, vgg16, ResNet 18/34')
 		# Select an RNN
@@ -174,14 +166,14 @@ class FusionModel(LightningModule):
 			fs = torch.zeros(nBatch, nFrames, self.rnn.input_size).cuda()
 			for kk in range(nFrames):
 				f_all = []
-				f = self.features(inputs[:, kk, :, :, :, 0].permute(0, 3, 1, 2)) # permute to nB x nC x H x W
+				f = self.features_rgb(inputs[:, kk, :, :, :, 0].permute(0, 3, 1, 2)) # permute to nB x nC x H x W
 				f = f.reshape(f.size(0), -1)
-				f = self.fc_pre(f)
+				f = self.fc_pre_rgb(f)
 				f_all.append(f)
 
-				f_of = self.features(inputs[:, kk, :, :, :, 1].permute(0, 3, 1, 2))  # permute to nB x nC x H x W
+				f_of = self.features_of(inputs[:, kk, :, :, :, 1].permute(0, 3, 1, 2))  # permute to nB x nC x H x W
 				f_of = f_of.reshape(f_of.size(0), -1)
-				f_of = self.fc_pre(f_of)
+				f_of = self.fc_pre_of(f_of)
 				f_all.append(f_of)
 
 				# Concat
@@ -195,8 +187,8 @@ class FusionModel(LightningModule):
 			#########################################################################################
 			# Convolutional flavors
 			for kk in range(nFrames):
-				f = self.features(inputs[:, kk, :, :, :, 0].permute(0, 3, 1, 2)) # permute to nB x nC x H x W
-				f_of = self.features(inputs[:, kk, :, :, :, 1].permute(0, 3, 1, 2))  # permute to nB x nC x H x W
+				f = self.features_rgb(inputs[:, kk, :, :, :, 0].permute(0, 3, 1, 2)) # permute to nB x nC x H x W
+				f_of = self.features_of(inputs[:, kk, :, :, :, 1].permute(0, 3, 1, 2))  # permute to nB x nC x H x W
 				
 				# Size nBatch x nChannels x H x W
 				if kk == 0:
@@ -270,9 +262,11 @@ class FusionModel(LightningModule):
 	def configure_optimizers(self):
 		self.layers_to_fit = [{'params': self.fc.parameters()}, {'params': self.rnn.parameters()}]
 		if self.fc_pre != None:
-			self.layers_to_fit.append({'params': self.fc_pre.parameters()})
+			self.layers_to_fit.append({'params': self.fc_pre_rgb.parameters()})
+			self.layers_to_fit.append({'params': self.fc_pre_of.parameters()})
 		if self.trainable_base:
-			self.layers_to_fit.append({'params': self.features.parameters()})
+			self.layers_to_fit.append({'params': self.features_rgb.parameters()})
+			self.layers_to_fit.append({'params': self.features_of.parameters()})
 		
 		optimizer = torch.optim.Adam(self.layers_to_fit,
 								lr=self.hparams.lr, betas=(0.9, 0.999), 
