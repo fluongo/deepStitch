@@ -90,7 +90,7 @@ class FusionModel(LightningModule):
 		self.predicted_softmax = []; self.predicted_softmax_train = []
 		self.batch_size = 1
 		############################################################################################
-		# Generate the train and test splits
+		# Generate the tra300in and test splits
 		fns = []
 		for class_curr in self.hparams.include_classes:
 			fns.extend(glob.glob(os.path.join(self.hparams.datadir, class_curr, 'flow%s*' % self.hparams.flow_method)))
@@ -101,7 +101,9 @@ class FusionModel(LightningModule):
 		############################################################################################
 
 		# Model specific
-		original_model = models.__dict__[args.arch](pretrained=self.hparams.use_pretrained)
+		original_model_rgb = models.__dict__[args.arch](pretrained=self.hparams.use_pretrained)
+		original_model_of = models.__dict__[args.arch](pretrained=self.hparams.use_pretrained)
+		
 		self.hidden_size = args.hidden_size
 		self.num_classes = len(args.include_classes)
 		self.fc_size = args.fc_size
@@ -109,10 +111,10 @@ class FusionModel(LightningModule):
 
 		# select a base model
 		if args.arch.startswith('alexnet'):
-			self.features_rgb = original_model.features
+			self.features_rgb = original_model_rgb.features
 			for i, param in enumerate(self.features_rgb.parameters()):
 				param.requires_grad = self.trainable_base
-			self.features_of = deepcopy(original_model.features)
+			self.features_of = original_model_of.features
 			for i, param in enumerate(self.features_of.parameters()):
 				param.requires_grad = self.trainable_base
 			
@@ -120,12 +122,24 @@ class FusionModel(LightningModule):
 			self.fc_pre_rgb = nn.Sequential(nn.Linear(256*6*6, int(args.fc_size/2) ), nn.Dropout()) if 'conv' not in args.rnn_model else None
 			self.fc_pre_of = nn.Sequential(nn.Linear(256*6*6, int(args.fc_size/2) ), nn.Dropout()) if 'conv' not in args.rnn_model else None
 			self.final_channels = 256
-		# elif args.arch.startswith('resnet18'):
-		# 	self.features = nn.Sequential(*list(original_model.children())[:-2])
-		# 	for i, param in enumerate(self.features.parameters()):
-		# 		param.requires_grad = self.trainable_base
-		# 	self.fc_pre = nn.Sequential(nn.Linear(512*7*7, int(args.fc_size/2)), nn.Dropout()) if 'conv' not in args.rnn_model else None
-		# 	self.final_channels = 512
+
+		elif args.arch.startswith('resnet18'):
+			# self.features = nn.Sequential(*list(original_model.children())[:-2])
+			# for i, param in enumerate(self.features.parameters()):
+			# 	param.requires_grad = self.trainable_base
+			# self.fc_pre = nn.Sequential(nn.Linear(512*7*7, int(args.fc_size/2)), nn.Dropout()) if 'conv' not in args.rnn_model else None
+			# self.final_channels = 512
+			self.features_rgb = nn.Sequential(*list(original_model_rgb.children())[:-2])
+			for i, param in enumerate(self.features_rgb.parameters()):
+				param.requires_grad = self.trainable_base
+			self.features_of = nn.Sequential(*list(original_model_of.children())[:-2])
+			for i, param in enumerate(self.features_of.parameters()):
+				param.requires_grad = self.trainable_base
+			
+			self.fc_pre_rgb = nn.Sequential(nn.Linear(512*7*7, int(args.fc_size/2) ), nn.Dropout()) if 'conv' not in args.rnn_model else None
+			self.fc_pre_of = nn.Sequential(nn.Linear(512*7*7, int(args.fc_size/2) ), nn.Dropout()) if 'conv' not in args.rnn_model else None
+			self.final_channels = 512
+
 		else:
 			raise ValueError('architecture base model not yet implemented choices: alexnet, vgg16, ResNet 18/34')
 		# Select an RNN
@@ -261,7 +275,7 @@ class FusionModel(LightningModule):
 		
 	def configure_optimizers(self):
 		self.layers_to_fit = [{'params': self.fc.parameters()}, {'params': self.rnn.parameters()}]
-		if self.fc_pre != None:
+		if self.fc_pre_rgb != None:
 			self.layers_to_fit.append({'params': self.fc_pre_rgb.parameters()})
 			self.layers_to_fit.append({'params': self.fc_pre_of.parameters()})
 		if self.trainable_base:
@@ -278,14 +292,14 @@ class FusionModel(LightningModule):
 	def train_dataloader(self):
 		train_dataset 	= CustomDataset(self.hparams.datadir, idxs = self.hparams.idx_train , include_classes = self.hparams.include_classes, 
 							flow_method = self.hparams.flow_method, balance_classes=True, mode = 'train', max_frames = self.hparams.loader_nframes, stride = self.hparams.loader_stride)
-		train_dataloader 	= DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=1)
+		train_dataloader 	= DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=0)
 		self.epoch_len = len(train_dataset)
 		return train_dataloader
 
 	def val_dataloader(self):
 		val_dataset 	= CustomDataset(self.hparams.datadir, idxs = self.hparams.idx_test , include_classes = self.hparams.include_classes, 
 							flow_method = self.hparams.flow_method, balance_classes=False, mode = 'val', max_frames = self.hparams.loader_nframes, stride = self.hparams.loader_stride)
-		val_dataloader 	= DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=1)
+		val_dataloader 	= DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=0)
 		return val_dataloader
 
 	def apply_transforms_GPU(self, batch, random_crop = False):
@@ -297,11 +311,13 @@ class FusionModel(LightningModule):
 		else:
 			rgb = self.augGPU_resize(batch[0][:, :, :, :int(nW/2), :].type(torch.float)/255., npix_resize = (224, 224))
 			of 	= self.augGPU_resize(batch[0][:, :, :, int(nW/2):, :].type(torch.float)/255., npix_resize = (224, 224))
-		of = self.augGPU_normalize_inplace(of, mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
-		rgb = self.augGPU_normalize_inplace(rgb, mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
-		#rgb = self.augGPU_normalize_inplace(rgb, mean = [0.3, 0.2, 0.2], std = [0.2, 0.2, 0.2])
-		#of = self.augGPU_normalize_inplace(of, mean = [0.01, 0.01, 0.01], std = [0.05, 0.05, 0.05])
-		print(of.size())
+		#of = self.augGPU_normalize_inplace(of, mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
+		#rgb = self.augGPU_normalize_inplace(rgb, mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
+		#print(of.reshape(-1, 3).mean(0))
+		rgb = self.augGPU_normalize_inplace(rgb, mean = [0.3, 0.2, 0.2], std = [0.2, 0.2, 0.2])
+		of = self.augGPU_normalize_inplace(of, mean = [0.99, 0.99, 0.99], std = [0.005, 0.005, 0.005])
+		#print(of.reshape(-1, 3).mean(0))
+		#print(of.reshape(-1, 3).var(0))
 
 		return [torch.stack([rgb, of], axis = -1), batch[1]]
 
@@ -339,18 +355,18 @@ if __name__ == '__main__':
 	# ARGS
 	parser = argparse.ArgumentParser(description='Training')
 	parser.add_argument('--loadchk', default='', help='Pass through to load training from a checkpoint')
-	parser.add_argument('--datadir', default='/home/fluongo/code/usc_project/usc_data/balint/training_ready/cfr_cut_mov', help='train directory')
+	parser.add_argument('--datadir', default='/home/fluongo/code/usc_project/usc_data/balint/training_ready_updated/cfr_cut_mov_v2', help='train directory')
 	parser.add_argument('--gpu', default=0, type=int, help='GPU device number')
 	parser.add_argument('--arch', default='alexnet', help='model architecture')
 	parser.add_argument('--trainable_base', default=0, type=int, help='Whether to train the feature extractor')
-	parser.add_argument('--rnn_model', default='LSTM', type=str, help='RNN model at clasification')
+	parser.add_argument('--rnn_model', default='convLSTM', type=str, help='RNN model at clasification')
 	parser.add_argument('--rnn_layers', default=2, type=int, help='number of rnn layers')
 	parser.add_argument('--hidden_size', default=16, type=int, help='output size of rnn hidden layers')
 	parser.add_argument('--fc_size', default=32, type=int, help='size of fully connected layer before rnn')
 	parser.add_argument('--epochs', default=60, type=int, help='manual epoch number')
 	parser.add_argument('--lr', default=0.0001, type=float, help='initial learning rate')
 	parser.add_argument('--lr_lambdas', default=0.9, type=float, help='Schedulre hyperparam')
-	parser.add_argument('--include_classes', default='01_02', type=str, help='Which classnames to include seperated by _ e.g. 00_01')
+	parser.add_argument('--include_classes', default='01_02_03_07_13', type=str, help='Which classnames to include seperated by _ e.g. 00_01')
 	parser.add_argument('--flow_method', default='flownet', type=str, help='Which flow method to use (flownet or dali)')
 	parser.add_argument('--random_crop', default=0, type=int, help='Whether or not to augment with random crops...')
 	parser.add_argument('--seed', default=0, type=int)
@@ -360,8 +376,8 @@ if __name__ == '__main__':
 	parser.add_argument('--overfit', default=0, type=int)
 	parser.add_argument('--auto_lr', default=0, type=int)
 	parser.add_argument('--use_pretrained', default=1, type=int, help='whether or not to load pretrained weights')
-	parser.add_argument('--logging_dir', default='lightning_logs', type=str)
-	parser.add_argument('--loader_nframes', default=300, type=int, help='How many frames to load at stride 2')
+	parser.add_argument('--logging_dir', default='/home/fluongo/code/usc_project/lightning_logs/dual_stream_othernorm', type=str)
+	parser.add_argument('--loader_nframes', default=140, type=int, help='How many frames to load at stride 2')
 	parser.add_argument('--loader_stride', default=2, type=int, help='stride for dataloader')
 	
 	hparams = parser.parse_args()
