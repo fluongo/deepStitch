@@ -134,7 +134,11 @@ class FusionModel(LightningModule):
 		elif args.arch.startswith('simCLR_alexnet'):
 			self.features = models.alexnet().features
 			# Load the weights for feature extractor
+<<<<<<< HEAD
 			ckpt_fn = '/home/fluongo/usc_code/deepStitch/pretrained_simCLR_alexnet_ckpt_epoch_959.ckpt' 
+=======
+			ckpt_fn = 'pretrained_simCLR_alexnet_ckpt_epoch_959.ckpt' 
+>>>>>>> cec0bd5a05ad67c2d4310d7e1d23b9be4e1b5c41
 			x = torch.load(ckpt_fn)
 			pretrained_dict = x['state_dict']
 			
@@ -156,7 +160,11 @@ class FusionModel(LightningModule):
 			self.features = nn.Sequential(*self.features[:-1]) # Chop off average pool used in the simCLR train
 			
 			# Load the weights for feature extractor
+<<<<<<< HEAD
 			ckpt_fn = '/home/fluongo/usc_code/deepStitch/pretrained_simCLR_resnet18_ckpt_epoch_960.ckpt' 
+=======
+			ckpt_fn = 'pretrained_simCLR_resnet18_ckpt_epoch_960.ckpt' 
+>>>>>>> cec0bd5a05ad67c2d4310d7e1d23b9be4e1b5c41
 			x = torch.load(ckpt_fn)
 			pretrained_dict = x['state_dict']
 			
